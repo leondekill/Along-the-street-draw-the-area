@@ -1,0 +1,205 @@
+<!--********************************************************************
+* Copyright© 2000 - 2018 SuperMap Software Co.Ltd. All rights reserved.
+*********************************************************************-->
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title data-i18n="resources.title_tiledMapLayerNoProj"></title>
+    <script type="text/javascript" src="../js/include-web.js"></script>
+    <script type="text/javascript" src="../../dist/openlayers/include-openlayers.js"></script>
+</head>
+<body style=" margin: 0;overflow: hidden;background: rgb(240, 236, 236);width: 100%;height:100%">
+<div id="map" style="width: 100%;height:100%"></div>
+<button id="click" style="position: absolute;top: 50px; right: 50px">沿路画面</button>
+<script type="text/javascript">
+
+$("#click").click(function(){
+    draw_point()
+})
+    //定义需用变量以及地图服务数据服务地址
+    var draw, vector_source,line_source;map;var pointlist=[];var polygon_point=[]; var line_layer;
+    var url = "http://localhost:8090/iserver/services/map-Changchun/rest/maps/长春市区图";
+    var serviceUrl="http://localhost:8090/iserver/services/transportationAnalyst-Changchun/rest/networkanalyst/RoadNet@Changchun";
+    var extent = [48.4, -7668.25, 8958.85, -55.58];
+    var projection = new ol.proj.Projection({
+        extent: extent,
+        units: 'm'
+    });
+    //加载地图
+    new ol.supermap.MapService(url).getMapInfo(function (serviceResult) {
+        var mapJSONObj = serviceResult.result;
+        map = new ol.Map({
+            target: 'map',
+            controls: ol.control.defaults({attributionOptions: {collapsed: false}})
+                .extend([new ol.supermap.control.Logo()]),
+            view: new ol.View({
+                center: [5105, -3375],
+                zoom: 1,
+                projection: projection,
+                origin: [48.4, -55.58]
+            })
+        });
+        var layer = new ol.layer.Tile({
+            source: new ol.source.TileSuperMapRest(ol.source.TileSuperMapRest.optionsFromMapJSON(url, mapJSONObj))
+        });
+        map.addLayer(layer);
+    });
+  
+//定义鼠标双击事件
+var dblick=function(){
+   console.log(pointlist[0],pointlist[pointlist.length-1],"dbclick");
+   create_road(pointlist[0],pointlist[pointlist.length-1]);//进行最后一次的路径分析
+   vector_source.clear();//清除点矢量图层
+   clearInteraction();//移除交互控件
+   setTimeout(() => {
+       //构造面对象并进行展示
+       console.log(polygon_point,"polygon_point")
+      // polygon_point.push(polygon_point[0])
+       var polygon = new ol.geom.Polygon([polygon_point]);
+       console.log(polygon,"polygon")
+       var polygonSource = new ol.source.Vector({
+            features: [new ol.Feature(polygon)],
+            wrapX: false
+        });
+        var polygon_layer=new ol.layer.Vector({
+                source: polygonSource,
+                style: new ol.style.Style({
+                stroke: new ol.style.Stroke({
+                    color: 'red',
+                    width: 3
+                }),
+                fill: new ol.style.Fill({
+                    color: 'rgba(0, 0, 255, 0.1)'
+                })
+               
+            })
+        });
+        map.addLayer(polygon_layer)
+       
+   }, 2000);
+}
+
+function draw_point(){
+    var count=0; 
+    vector_source= new ol.source.Vector({wrapX: false});
+    var vector = new ol.layer.Vector({
+        source: vector_source
+    });
+    map.addLayer(vector);
+    //创建交互控件画点，同时通过count变量监听点击的次数，以此改变鼠标hover的test内容样式
+    draw = new ol.interaction.Draw({
+                source: vector_source,
+                type: "Point",
+                snapTolerance: 20,
+                style:function(e){
+                        if(count==0)
+                        {
+                            return  new ol.style.Style({
+                                text:new ol.style.Text({
+                                    text:""
+                                })
+                            })
+                        }
+                        else if(count==1)
+                        {
+                            return  new ol.style.Style({
+                                text:new ol.style.Text({
+                                    text:"点击左建继续画区",
+                                    padding:[3,3,3,3],
+                                    backgroundFill:new ol.style.Fill({
+                                        color:"rgba(87, 86, 86,0.45)"
+                                    }),
+                                    textAlign:"left",
+                                    font:"bold  12px red"
+                                })
+                            })
+                        }
+                        else 
+                        {
+                            return  new ol.style.Style({
+                                text:new ol.style.Text({
+                                    text:"点击确定地点，双击结束",
+                                    backgroundFill:new ol.style.Fill({
+                                        color:"rgba(87, 86, 86,0.45)"
+                                    }),
+                                    textAlign:"left",
+                                    padding:[3,3,3,3],
+                                    font:"bold 12px red"
+                                })
+                            })
+                        }
+                }
+            });
+    map.addInteraction(draw);  //向地图添加交互控件
+    map.on("dblclick",dblick);  //注册地图鼠标双击事件
+    draw.on("drawstart",function(){
+        count=count+1;  //点击一次增加count数
+    });
+    draw.on("drawend",function(e){
+         //获取绘制点的几何对象，并存入数组
+       pointlist.push(new ol.geom.Point(e.feature.getGeometry().A));
+       if(pointlist.length>1)
+       {
+          console.log(pointlist[pointlist.length-2],pointlist[pointlist.length-1],"1");
+          create_road(pointlist[pointlist.length-2],pointlist[pointlist.length-1]) //分析每个点到前一个点的最近线路
+       }
+    })
+ }
+
+function clearInteraction() {
+        if (draw) {
+            map.removeInteraction(draw);
+        }
+    }
+
+function create_road(one,two){
+  //设置最佳路径分析参数信息
+    var resultSetting = new SuperMap.TransportationAnalystResultSetting({
+            returnEdgeFeatures: true,
+            returnEdgeGeometry: true,
+            returnEdgeIDs: true,
+            returnNodeFeatures: true,
+            returnNodeGeometry: true,
+            returnNodeIDs: true,
+            returnPathGuides: true,
+            returnRoutes: true
+        });
+        var analystParameter = new SuperMap.TransportationAnalystParameter({
+            resultSetting: resultSetting,
+            weightFieldName: "SmLength"
+        });
+        var findPathParameter = new SuperMap.FindPathParameters({
+            isAnalyzeById: false,
+            nodes: [one,two],  //传入绘制点node参数
+            hasLeastEdgeCount: false,
+            parameter: analystParameter
+        });
+    new ol.supermap.NetworkAnalystService(serviceUrl).findPath(findPathParameter, function (serviceResult) {
+            //分析出线路并在前端进行渲染显示
+            console.log(serviceResult.result,"serviceResult.result");
+            line_source=new ol.source.Vector({wrapX: false});
+            var line_layer = new ol.layer.Vector({
+                source: line_source
+            });
+            map.addLayer(line_layer)
+            //将分析出来组成线路的NodeFeature存入数组
+            serviceResult.result.pathList.map(function(value){
+                    console.log((new ol.format.GeoJSON()).readFeatures(value.route),"value.route");
+                    line_source.addFeatures((new ol.format.GeoJSON()).readFeatures(value.route));
+                    console.log(value,"va")
+                    console.log(value.nodeFeatures.features.length)
+                    for(var i=0;i<value.nodeFeatures.features.length;i++)
+                    {   
+                        console.log(value.nodeFeatures.features[i].geometry.coordinates)
+                        polygon_point.push(value.nodeFeatures.features[i].geometry.coordinates)               
+                    }
+        });   
+    })
+}
+//注释: 沿路画线  1.点击-最佳路径分析，分析出每个点到前一个点的线路，并且记录下分析出来线路的node
+//               2.双击-结束绘制事件，分析出第一个点到最后一点的最佳路径并记录分析出来了node
+//               3.最后通过node来构造出面对象
+</script>
+</body>
+</html>
